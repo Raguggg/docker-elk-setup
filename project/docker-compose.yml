@@ -1,0 +1,86 @@
+services:
+  # Database service
+  db:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    volumes:
+      # add the DB files store in local machine to avoid data loss when the container is removed
+      - ../pgdata:/var/lib/postgresql/data
+      - ./Config/Postgress/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 1m30s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "udp://127.0.0.1:12201"
+
+    restart: always
+
+  # Web service
+  web:
+    image: web
+    build:
+      context: .
+      dockerfile: ./Config/Django/Dockerfile
+    volumes:
+      - static_files:/app/staticfiles
+      - DEBUG_LOGS:/app/DEBUG_LOGS
+    environment:
+      - DB_NAME=postgres
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=db
+      - DB_PORT=5432
+    healthcheck:
+      test: ["CMD", "curl", "--silent", "--fail", "http://localhost:8000/admin/login/"]
+      interval: 1m30s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      db:
+        condition: service_healthy
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "udp://127.0.0.1:12201"
+
+    restart: always
+
+  # Nginx service
+  nginx:
+    image: nginx:latest
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Config/Nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./Config/Nginx/security.conf:/etc/nginx/security.conf
+
+    depends_on:
+      web:
+        condition: service_healthy
+    logging:
+        driver: gelf
+        options:
+          gelf-address: "udp://127.0.0.1:12201"
+
+    restart: always
+
+volumes:
+  static_files:
+  DEBUG_LOGS:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${DEBUG_LOGS_PATH:-${PWD}/DEBUG_LOGS}
+      o: bind
+
